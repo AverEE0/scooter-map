@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <title>Карта самокатов</title>
+  <script src="https://api-maps.yandex.ru/2.1/?lang=ru_RU&apikey=b3c41ed5-5049-4941-8a78-0520971dc741"></script>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body, #map {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+    }
+    #status {
+      position: absolute;
+      top: 12px;
+      left: 12px;
+      background: white;
+      padding: 8px 12px;
+      border-radius: 6px;
+      font-family: Arial, sans-serif;
+      font-size: 14px;
+      z-index: 100;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.2);
+    }
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+  <div id="status">Загрузка...</div>
+
+  <script>
+    const SESSION_KEY = 'f56b11aaa9921dd9cc3c4be9f40efa37';
+    const API_URL = `http://api.gisnavi.ru:9185/api/device/all?session=${SESSION_KEY}`;
+    const SCOOTER_ICON = 'https://i.ibb.co/SLGVPJH/image-6.png';
+
+    let map;
+    const placemarks = new Map();
+
+    ymaps.ready(() => {
+      map = new ymaps.Map('map', {
+        center: [55.75, 37.62],
+        zoom: 11,
+        controls: ['zoomControl', 'typeSelector']
+      });
+
+      updateMap();
+      setInterval(updateMap, 15000);
+    });
+
+    async function updateMap() {
+      const status = document.getElementById('status');
+      try {
+        status.textContent = '📡 Запрос данных...';
+
+        const res = await fetch(API_URL);
+        if (!res.ok) throw new Error(`API error: ${res.status}`);
+        const devices = await res.json();
+
+        const validDevices = devices.filter(d =>
+          d.imei && d.latitude && d.longitude &&
+          !isNaN(parseFloat(d.latitude)) && !isNaN(parseFloat(d.longitude))
+        );
+
+        validDevices.forEach(d => {
+          const coords = [parseFloat(d.latitude), parseFloat(d.longitude)];
+          const time = d.dateConnection 
+            ? new Date(d.dateConnection).toLocaleTimeString('ru-RU')
+            : '—';
+          const voltage = d.voltage_pit != null 
+            ? `${parseFloat(d.voltage_pit).toFixed(1)} В` 
+            : '—';
+
+          const balloon = `
+            <b>${d.name || 'Самокат'}</b><br>
+            IMEI: ${d.imei}<br>
+            Напряжение: ${voltage}<br>
+            Время: ${time}
+          `;
+
+          if (placemarks.has(d.imei)) {
+            const pm = placemarks.get(d.imei);
+            pm.geometry.setCoordinates(coords);
+            pm.properties.set({ balloonContent: balloon });
+          } else {
+            const pm = new ymaps.Placemark(coords, { balloonContent: balloon }, {
+              iconLayout: 'default#image',
+              iconImageHref: SCOOTER_ICON,
+              iconImageSize: [32, 32],
+              iconImageOffset: [-16, -32]
+            });
+            map.geoObjects.add(pm);
+            placemarks.set(d.imei, pm);
+          }
+        });
+
+        const currentImeis = new Set(validDevices.map(d => d.imei));
+        placemarks.forEach((pm, imei) => {
+          if (!currentImeis.has(imei)) {
+            map.geoObjects.remove(pm);
+            placemarks.delete(imei);
+          }
+        });
+
+        status.textContent = `✅ Самокатов: ${validDevices.length}`;
+      } catch (err) {
+        console.error('Ошибка:', err);
+        status.textContent = `❌ Ошибка: ${err.message || 'сеть/API'}`;
+      }
+    }
+  </script>
+</body>
+</html>
