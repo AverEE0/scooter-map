@@ -31,9 +31,8 @@
   <div id="status">Загрузка...</div>
 
   <script>
-    const SESSION_KEY = 'f56b11aaa9921dd9cc3c4be9f40efa37';
     const API_URL = 'http://212.113.123.94:3000/api/devices';
-    const SCOOTER_ICON = 'https://i.ibb.co/SLGVPJH/image-6.png';
+    const SCOOTER_ICON = 'https://i.ibb.co/SLGVPJH/image-6.png'; // Убраны пробелы!
 
     let map;
     const placemarks = new Map();
@@ -58,8 +57,12 @@
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const devices = await res.json();
 
+        if (!Array.isArray(devices)) {
+          throw new Error('Ответ не является массивом');
+        }
+
         const validDevices = devices.filter(d =>
-          d.imei && d.latitude && d.longitude &&
+          d.imei && d.latitude != null && d.longitude != null &&
           !isNaN(parseFloat(d.latitude)) && !isNaN(parseFloat(d.longitude))
         );
 
@@ -97,12 +100,12 @@
 
         // Удаляем исчезнувшие метки
         const currentImeis = new Set(validDevices.map(d => d.imei));
-        placemarks.forEach((pm, imei) => {
+        for (const [imei, pm] of placemarks.entries()) {
           if (!currentImeis.has(imei)) {
             map.geoObjects.remove(pm);
             placemarks.delete(imei);
           }
-        });
+        }
 
         status.textContent = `✅ Самокатов: ${validDevices.length}`;
       } catch (err) {
