@@ -9,7 +9,7 @@
     * { margin: 0; padding: 0; box-sizing: border-box; }
     html, body, #map {
       width: 100%;
-      height: 100%;
+      height: 100vh;
       overflow: hidden;
     }
     #status {
@@ -31,8 +31,9 @@
   <div id="status">Загрузка...</div>
 
   <script>
+    // ✅ Используем HTTPS-адрес от Cloudflare Tunnel
     const API_URL = 'https://toilet-healthy-styles-booking.trycloudflare.com/api/devices';
-    const SCOOTER_ICON = 'https://i.ibb.co/SLGVPJH/image-6.png'; // Убраны пробелы!
+    const SCOOTER_ICON = 'https://i.ibb.co/SLGVPJH/image-6.png';
 
     let map;
     const placemarks = new Map();
@@ -57,12 +58,8 @@
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const devices = await res.json();
 
-        if (!Array.isArray(devices)) {
-          throw new Error('Ответ не является массивом');
-        }
-
         const validDevices = devices.filter(d =>
-          d.imei && d.latitude != null && d.longitude != null &&
+          d.imei && d.latitude && d.longitude &&
           !isNaN(parseFloat(d.latitude)) && !isNaN(parseFloat(d.longitude))
         );
 
