@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Карта самоката</title>
+  <script src="https://api-maps.yandex.ru/2.1/?lang=ru_RU&apikey=b3c41ed5-5049-4941-8a78-0520971dc741"></script>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body, #map {
+      width: 100%;
+      height: 100vh;
+      overflow: hidden;
+    }
+    #status {
+      position: absolute;
+      top: 12px;
+      left: 12px;
+      background: white;
+      padding: 8px 12px;
+      border-radius: 6px;
+      font-family: Arial, sans-serif;
+      font-size: 14px;
+      z-index: 100;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.2);
+    }
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+  <div id="status">Загрузка...</div>
+
+  <script>
+    // ✅ Убраны лишние пробелы!
+    const API_URL = 'https://bag-amsterdam-hebrew-enforcement.trycloudflare.com/api/devices';
+    const SCOOTER_ICON = 'https://i.ibb.co/SLGVPJH/image-6.png';
+
+    let map;
+    let currentPlacemark = null;
+
+    ymaps.ready(() => {
+      map = new ymaps.Map('map', {
+        center: [55.75, 37.62],
+        zoom: 12,
+        controls: ['zoomControl']
+      });
+
+      updateScooter();
+      setInterval(updateScooter, 15000);
+    });
+
+    async function updateScooter() {
+      const status = document.getElementById('status');
+      try {
+        status.textContent = '📡 Запрос данных...';
+
+        const res = await fetch(API_URL);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const devices = await res.json();
+
+        const validDevices = devices.filter(d =>
+          d.imei && d.latitude && d.longitude &&
+          !isNaN(parseFloat(d.latitude)) && !isNaN(parseFloat(d.longitude))
+        );
+
+        // Получаем IMEI из URL
+        const urlParams = new URLSearchParams(window.location.search);
+        const targetImei = urlParams.get('imei');
+
+        if (!targetImei) {
+          status.textContent = '❌ Не указан IMEI в URL';
+          return;
+        }
+
+        // Ищем устройство по точному IMEI
+        const scooter = validDevices.find(d => d.imei === targetImei);
+
+        if (!scooter) {
+          status.textContent = `❌ Самокат с IMEI ${targetImei} не найден`;
+          return;
+        }
+
+        const coords = [parseFloat(scooter.latitude), parseFloat(scooter.longitude)];
+        const time = scooter.dateConnection 
+          ? new Date(scooter.dateConnection).toLocaleTimeString('ru-RU')
+          : '—';
+        const voltage = scooter.voltage_pit != null 
+          ? `${parseFloat(scooter.voltage_pit).toFixed(1)} В` 
+          : '—';
+        const name = scooter.name || 'Самокат без имени';
+
+        const balloon = `
+          <b>${name}</b><br>
+          IMEI: ${scooter.imei}<br>
+          Напряжение: ${voltage}<br>
+          Обновлено: ${time}
+        `;
+
+        // Удаляем старую метку
+        if (currentPlacemark) {
+          map.geoObjects.remove(currentPlacemark);
+        }
+
+        // Создаём новую
+        currentPlacemark = new ymaps.Placemark(coords, { balloonContent: balloon }, {
+          iconLayout: 'default#image',
+          iconImageHref: SCOOTER_ICON,
+          iconImageSize: [36, 36],
+          iconImageOffset: [-18, -36]
+        });
+
+        map.geoObjects.add(currentPlacemark);
+        map.setCenter(coords, 16);
+        currentPlacemark.balloon.open();
+
+        status.textContent = '✅ Данные обновлены';
+      } catch (err) {
+        console.error('Ошибка:', err);
+        status.textContent = `❌ Ошибка: ${err.message || 'сеть/API'}`;
+      }
+    }
+  </script>
+</body>
+</html>
