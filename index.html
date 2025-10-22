@@ -31,7 +31,7 @@
   <div id="status">Загрузка...</div>
 
   <script>
-    // ✅ Используем HTTPS-адрес от Cloudflare Tunnel
+    // ✅ Убираем лишние пробелы!
     const API_URL = 'https://bag-amsterdam-hebrew-enforcement.trycloudflare.com/api/devices';
     const SCOOTER_ICON = 'https://i.ibb.co/SLGVPJH/image-6.png';
 
@@ -72,24 +72,35 @@
             ? `${parseFloat(d.voltage_pit).toFixed(1)} В` 
             : '—';
 
+          const detailUrl = `https://rentdrive.ru/scooter/${d.imei}`;
           const balloon = `
             <b>${d.name || 'Самокат'}</b><br>
             IMEI: ${d.imei}<br>
             Напряжение: ${voltage}<br>
-            Время: ${time}
+            Время: ${time}<br>
+            <a href="${detailUrl}" target="_blank" style="color:#007bff; text-decoration:underline; font-size:13px;">
+              Подробнее →
+            </a>
           `;
 
           if (placemarks.has(d.imei)) {
             const pm = placemarks.get(d.imei);
             pm.geometry.setCoordinates(coords);
             pm.properties.set({ balloonContent: balloon });
+            // Обработчик клика уже есть — не нужно добавлять повторно
           } else {
             const pm = new ymaps.Placemark(coords, { balloonContent: balloon }, {
               iconLayout: 'default#image',
               iconImageHref: SCOOTER_ICON,
               iconImageSize: [32, 32],
-              iconImageOffset: [-16, -32]
+              iconImageOffset: [-16, -32],
+              cursor: 'pointer'
             });
+
+            pm.events.add('click', () => {
+              window.open(detailUrl, '_blank');
+            });
+
             map.geoObjects.add(pm);
             placemarks.set(d.imei, pm);
           }
