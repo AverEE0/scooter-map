@@ -31,7 +31,6 @@
   <div id="status">Загрузка...</div>
 
   <script>
-    // ✅ Убраны лишние пробелы!
     const API_URL = 'https://bag-amsterdam-hebrew-enforcement.trycloudflare.com/api/devices';
     const SCOOTER_ICON = 'https://i.ibb.co/SLGVPJH/image-6.png';
 
@@ -44,7 +43,6 @@
         zoom: 12,
         controls: ['zoomControl']
       });
-
       updateScooter();
       setInterval(updateScooter, 15000);
     });
@@ -63,18 +61,16 @@
           !isNaN(parseFloat(d.latitude)) && !isNaN(parseFloat(d.longitude))
         );
 
-        // Получаем IMEI из URL
+        // Получаем IMEI из URL iframe
         const urlParams = new URLSearchParams(window.location.search);
         const targetImei = urlParams.get('imei');
 
         if (!targetImei) {
-          status.textContent = '❌ Не указан IMEI в URL';
+          status.textContent = '❌ Не указан IMEI';
           return;
         }
 
-        // Ищем устройство по точному IMEI
         const scooter = validDevices.find(d => d.imei === targetImei);
-
         if (!scooter) {
           status.textContent = `❌ Самокат с IMEI ${targetImei} не найден`;
           return;
@@ -87,26 +83,34 @@
         const voltage = scooter.voltage_pit != null 
           ? `${parseFloat(scooter.voltage_pit).toFixed(1)} В` 
           : '—';
-        const name = scooter.name || 'Самокат без имени';
+        const name = scooter.name || 'Самокат';
 
-        const balloon = `
-          <b>${name}</b><br>
-          IMEI: ${scooter.imei}<br>
-          Напряжение: ${voltage}<br>
-          Обновлено: ${time}
-        `;
+        // ✅ Исправлено: убраны лишние пробелы в URL
+        const detailUrl = `https://rentdrive.ru/scooter/${targetImei}`;
 
-        // Удаляем старую метку
         if (currentPlacemark) {
           map.geoObjects.remove(currentPlacemark);
         }
 
-        // Создаём новую
-        currentPlacemark = new ymaps.Placemark(coords, { balloonContent: balloon }, {
+        currentPlacemark = new ymaps.Placemark(coords, {
+          balloonContent: `
+            <b>${name}</b><br>
+            Напряжение: ${voltage}<br>
+            Обновлено: ${time}<br>
+            <a href="${detailUrl}" target="_blank" style="color:#007bff; text-decoration:underline; font-size:13px;">
+              Подробнее →
+            </a>
+          `
+        }, {
           iconLayout: 'default#image',
           iconImageHref: SCOOTER_ICON,
           iconImageSize: [36, 36],
-          iconImageOffset: [-18, -36]
+          iconImageOffset: [-18, -36],
+          cursor: 'pointer'
+        });
+
+        currentPlacemark.events.add('click', () => {
+          window.open(detailUrl, '_blank');
         });
 
         map.geoObjects.add(currentPlacemark);
