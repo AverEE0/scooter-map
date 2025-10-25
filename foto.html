@@ -27,7 +27,6 @@
       width: 100%;
       height: 100%;
       object-fit: cover;
-      transform: scaleX(-1);
     }
     #canvas { display: none; }
     #controls {
@@ -111,10 +110,7 @@
       canvas.width = video.videoWidth;
       canvas.height = video.videoHeight;
 
-      ctx.save();
-      ctx.scale(-1, 1);
-      ctx.drawImage(video, -canvas.width, 0, canvas.width, canvas.height);
-      ctx.restore();
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
       const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
       photos.push(dataUrl);
