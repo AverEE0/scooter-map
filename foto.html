@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Акт возврата - Фото</title>
+  <title>Акт возврата - Фото (отправка админу)</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body {
@@ -62,6 +62,9 @@
       text-align: center;
       padding: 20px;
     }
+    #status { text-align:center; margin-top:10px; font-size:14px; }
+    #advanced { margin-top:12px; font-size:13px; color:#ccc }
+    input, label { font-size:13px }
   </style>
 </head>
 <body>
@@ -77,22 +80,68 @@
     <button id="sendBtn">📤 Отправить всё</button>
   </div>
 
+  <div id="status"></div>
+
+  <!-- Advanced options: можно оставить пустыми. Рекомендуемый способ: настроить серверный endpoint и указать его URL ниже. -->
+  <div id="advanced">
+    <details>
+      <summary>Дополнительно: настройки отправки (нажмите чтобы раскрыть)</summary>
+      <p>Рекомендуется настроить серверный endpoint, который примет фото и отправит их администраторам от имени бота (без передачи токена в клиенте).</p>
+      <p>
+        1) Укажите URL вашего сервера, например: <code>https://example.com/upload_photos</code>.
+      </p>
+      <p>
+        2) Если вы хотите отправлять напрямую из клиента (НЕ РЕКОМЕНДУЕТСЯ — токен бота будет виден в коде/клиенте), разверните "Direct to Telegram" и укажите токен и ID администраторов.
+      </p>
+
+      <div>
+        <label>Server upload URL: <input id="serverUrl" type="text" placeholder="https://your.server/upload_photos" style="width:100%" /></label>
+      </div>
+      <hr>
+      <details>
+        <summary>Direct to Telegram (небезопасно, используйте только для теста)</summary>
+        <div>
+          <label>Bot token: <input id="botToken" type="text" placeholder="123456:ABC-DEF..." style="width:100%" /></label>
+        </div>
+        <div>
+          <label>Admin chat IDs (comma-separated): <input id="adminIds" type="text" placeholder="123456789,987654321" style="width:100%" /></label>
+        </div>
+      </details>
+
+    </details>
+  </div>
+
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
   <script>
+    // ==================================================================================
+    // Этот файл основан на оригинальной foto.html (сохранена логика съёмки).
+    // Изменения: при нажатии "Отправить всё" добавлена опция отправки фото администраторам.
+    // Подходы:
+    //  - РЕКОМЕНДУЕМЫЙ: укажите SERVER_UPLOAD_URL — клиент загрузит фото на ваш сервер (POST multipart/form-data),
+    //    сервер уже отправит фото администраторам с помощью Bot API (без раскрытия токена на клиенте).
+    //  - ОПЦИЯ (небезопасно): укажите BOT_TOKEN и ADMIN IDs ниже — клиент отправит фото напрямую в Telegram Bot API.
+    // ==================================================================================
+
     const video = document.getElementById('video');
     const canvas = document.getElementById('canvas');
     const ctx = canvas.getContext('2d');
     const captureBtn = document.getElementById('captureBtn');
     const sendBtn = document.getElementById('sendBtn');
     const countEl = document.getElementById('count');
+    const statusEl = document.getElementById('status');
+
+    const serverUrlInput = document.getElementById('serverUrl');
+    const botTokenInput = document.getElementById('botToken');
+    const adminIdsInput = document.getElementById('adminIds');
 
     let photos = [];
     let photoCount = 0;
     const MAX_PHOTOS = 6;
 
-    const tg = window.Telegram.WebApp;
-    tg.ready();
-    tg.expand();
+    const tg = window.Telegram ? window.Telegram.WebApp : null;
+    if (tg) {
+      try { tg.ready(); tg.expand(); } catch(e) { console.warn('tg init', e); }
+    }
 
     navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } })
       .then(stream => {
@@ -107,12 +156,13 @@
     captureBtn.onclick = () => {
       if (photoCount >= MAX_PHOTOS) return;
 
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
+      canvas.width = video.videoWidth || 1280;
+      canvas.height = video.videoHeight || 720;
 
       ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
-      const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+      // Сохраняем сжатый JPEG, чтобы уменьшить размер
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.7);
       photos.push(dataUrl);
       photoCount++;
 
@@ -122,18 +172,140 @@
         captureBtn.disabled = true;
         sendBtn.style.display = 'block';
       }
+
+      // Показываем кнопку отправки также если сделали хотя бы 1 фото
+      if (photoCount > 0) sendBtn.style.display = 'block';
     };
 
-    sendBtn.onclick = () => {
+    // Utility: convert dataURL to Blob
+    function dataURLToBlob(dataURL) {
+      const parts = dataURL.split(',');
+      const mime = parts[0].match(/:(.*?);/)[1];
+      const binary = atob(parts[1]);
+      const array = [];
+      for (let i = 0; i < binary.length; i++) array.push(binary.charCodeAt(i));
+      return new Blob([new Uint8Array(array)], { type: mime });
+    }
+
+    // Send photos to server endpoint (recommended)
+    async function uploadToServer(url) {
+      if (!url) throw new Error('Server URL not provided');
+      statusEl.textContent = 'Отправка на сервер...';
+
+      const form = new FormData();
+      form.append('photoCount', photos.length);
+      // Добавляем файлы: photo0, photo1, ...
+      photos.forEach((d, idx) => {
+        const blob = dataURLToBlob(d);
+        form.append('photo' + idx, blob, `photo_${idx}.jpg`);
+      });
+
+      // Можно добавить дополнительную мета-информацию, например id аренды
+      // form.append('rental_id', '...');
+
+      const resp = await fetch(url, {
+        method: 'POST',
+        body: form
+      });
+
+      if (!resp.ok) {
+        const text = await resp.text();
+        throw new Error('Server error: ' + resp.status + ' ' + text);
+      }
+
+      const result = await resp.json().catch(() => null);
+      return result;
+    }
+
+    // Direct send to Telegram Bot API from client (insecure — token exposed in client). Use only for testing.
+    async function sendDirectToTelegram(botToken, adminIds) {
+      if (!botToken) throw new Error('Bot token not provided');
+      if (!adminIds || adminIds.length === 0) throw new Error('Admin IDs not provided');
+
+      statusEl.textContent = 'Отправка напрямую в Telegram (под капотом Bot API)...';
+
+      // For each admin, send photos one by one (could be optimized with sendMediaGroup server-side)
+      for (const adminId of adminIds) {
+        for (let i = 0; i < photos.length; i++) {
+          const blob = dataURLToBlob(photos[i]);
+          const fd = new FormData();
+          fd.append('chat_id', adminId.trim());
+          fd.append('photo', blob, `photo_${i}.jpg`);
+          fd.append('caption', `Фото возврата (${i+1}/${photos.length})`);
+
+          const res = await fetch(`https://api.telegram.org/bot${botToken}/sendPhoto`, {
+            method: 'POST',
+            body: fd
+          });
+
+          if (!res.ok) {
+            const text = await res.text();
+            throw new Error('Telegram API error: ' + res.status + ' ' + text);
+          }
+        }
+      }
+
+      return true;
+    }
+
+    // Fallback: send small metadata to bot via tg.sendData (may be too large for images)
+    function sendViaWebAppData() {
+      if (!tg) throw new Error('Telegram WebApp not available');
+      statusEl.textContent = 'Отправка данных в бот через WebApp (без файлов)...';
       const payload = {
         action: "return_photos",
         photoCount: photoCount,
-        photos: photos
+        // НЕ отправляем сами большие dataURLs здесь, только миниатюры или пустой маркер
+        // если вы хотите отправлять thumbnails, добавьте уменьшенные версии (очень маленькие)
+        note: 'photos_ready_on_client'
       };
-
       tg.sendData(JSON.stringify(payload));
-      tg.close();
+      return true;
+    }
+
+    sendBtn.onclick = async () => {
+      statusEl.textContent = '';
+      sendBtn.disabled = true;
+      captureBtn.disabled = true;
+
+      const serverUrl = (serverUrlInput && serverUrlInput.value && serverUrlInput.value.trim()) || null;
+      const botToken = (botTokenInput && botTokenInput.value && botTokenInput.value.trim()) || null;
+      const adminIdsRaw = (adminIdsInput && adminIdsInput.value && adminIdsInput.value.trim()) || null;
+      const adminIds = adminIdsRaw ? adminIdsRaw.split(',').map(s => s.trim()).filter(Boolean) : [];
+
+      try {
+        if (serverUrl) {
+          // Recommended flow: upload to your server; server will forward to admins
+          const res = await uploadToServer(serverUrl);
+          statusEl.textContent = 'Успешно отправлено на сервер.';
+          // Optionally inform the bot via WebApp that upload finished
+          if (tg) {
+            try { tg.sendData(JSON.stringify({ action: 'uploaded_to_server', result: res })); } catch(e) { console.warn(e); }
+          }
+        } else if (botToken && adminIds.length > 0) {
+          // Direct (insecure) sending from client to Telegram
+          await sendDirectToTelegram(botToken, adminIds);
+          statusEl.textContent = 'Фото отправлены администраторам напрямую.';
+          if (tg) { try { tg.sendData(JSON.stringify({ action: 'sent_direct'})); } catch(e){} }
+        } else if (tg) {
+          // Fallback: notify bot to request files another way (e.g., ask user to upload or use server)
+          sendViaWebAppData();
+          statusEl.textContent = 'Данные отправлены в бот (без файлов). Настройте сервер для приёма фото.';
+        } else {
+          throw new Error('Нет способа отправить фото: укажите Server URL или Bot Token + Admin IDs.');
+        }
+      } catch (err) {
+        console.error(err);
+        statusEl.textContent = 'Ошибка при отправке: ' + (err.message || err);
+        alert('Ошибка при отправке: ' + (err.message || err));
+      } finally {
+        sendBtn.disabled = false;
+        captureBtn.disabled = false;
+        // Optionally close webapp
+        try { if (tg) tg.close(); } catch(e){}
+      }
     };
+
   </script>
 </body>
 </html>
