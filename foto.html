@@ -1,253 +1,139 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="ru">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Фото возврата</title>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Акт возврата - Фото</title>
   <style>
-    body { font-family: Arial, Helvetica, sans-serif; margin: 0; padding: 16px; background:#f7f7f7; color:#222 }
-    .container { max-width:720px; margin:0 auto; }
-    h1 { font-size:18px; margin:0 0 12px }
-    p { margin:0 0 12px; color:#444 }
-    #photos { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:12px }
-    .thumb { position:relative; width:120px; height:120px; border-radius:8px; overflow:hidden; background:#eee; display:flex; align-items:center; justify-content:center }
-    .thumb img { width:100%; height:100%; object-fit:cover }
-    .remove-btn { position:absolute; top:6px; right:6px; background:rgba(0,0,0,0.6); color:#fff; border:none; border-radius:4px; padding:2px 6px; font-size:12px; cursor:pointer }
-    .controls { display:flex; gap:8px; margin-bottom:12px; flex-wrap:wrap }
-    button { padding:10px 14px; font-size:15px; border-radius:8px; border:0; cursor:pointer }
-    button.primary { background:#2f80ed; color:#fff }
-    button.ghost { background:#fff; border:1px solid #ddd; color:#333 }
-    .note { font-size:13px; color:#666; margin-top:8px }
-    progress { width:100%; height:14px; }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+      padding: 16px;
+      background: #000;
+      color: white;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+    #videoContainer {
+      position: relative;
+      width: 100%;
+      flex: 1;
+      overflow: hidden;
+      border-radius: 12px;
+      background: #111;
+    }
+    #video {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+    #canvas { display: none; }
+    #controls {
+      margin-top: 16px;
+      display: flex;
+      gap: 12px;
+    }
+    button {
+      flex: 1;
+      padding: 14px;
+      border: none;
+      border-radius: 10px;
+      font-size: 16px;
+      font-weight: bold;
+      cursor: pointer;
+    }
+    #captureBtn {
+      background: #ff3b30;
+      color: white;
+    }
+    #sendBtn {
+      background: #34c759;
+      color: white;
+      display: none;
+    }
+    #counter {
+      text-align: center;
+      margin: 12px 0;
+      font-size: 18px;
+    }
+    .error {
+      color: #ff3b30;
+      text-align: center;
+      padding: 20px;
+    }
   </style>
 </head>
 <body>
-  <div class="container">
-    <h1>Фото при возврате техники</h1>
-    <p>Сделайте фото техники (несколько) и нажмите «Отправить фото». Фото будут отправлены администраторам.</p>
-
-    <div class="controls">
-      <!-- Измените accept/capture по желанию; capture="environment" откроет заднюю камеру на мобильных -->
-      <input id="fileInput" type="file" accept="image/*" capture="environment" multiple />
-      <button id="takeBtn" class="ghost">Открыть камеру</button>
-      <button id="sendBtn" class="primary">Отправить фото</button>
-    </div>
-
-    <div id="photos" aria-live="polite"></div>
-
-    <div id="progressWrap" style="display:none">
-      <progress id="progress" value="0" max="100"></progress>
-      <div class="note" id="progressText">Подготовка...</div>
-    </div>
-
-    <p class="note">Рекомендуется не больше 5 фото. Сжатие выполняется автоматически (для стабильной отправки).</p>
+  <div id="videoContainer">
+    <video id="video" autoplay playsinline muted></video>
+    <canvas id="canvas"></canvas>
   </div>
 
+  <div id="counter">Сделано фото: <span id="count">0</span> / 6</div>
+
+  <div id="controls">
+    <button id="captureBtn">📸 Сделать фото</button>
+    <button id="sendBtn">📤 Отправить всё</button>
+  </div>
+
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
   <script>
-    // Конфигурация: можно изменить
-    const MAX_PHOTOS = 8;        // максимально разрешённое число фото на отправку
-    const MAX_WIDTH = 1280;      // максимальная ширина при ресайзе
-    const JPEG_QUALITY = 0.78;   // качество сжатия (0..1)
-    const MAX_TOTAL_MB = 6;      // опционально: ограничение общего размера в МБ (не строго)
-
-    const fileInput = document.getElementById('fileInput');
-    const photosWrap = document.getElementById('photos');
+    const video = document.getElementById('video');
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    const captureBtn = document.getElementById('captureBtn');
     const sendBtn = document.getElementById('sendBtn');
-    const takeBtn = document.getElementById('takeBtn');
-    const progressWrap = document.getElementById('progressWrap');
-    const progressEl = document.getElementById('progress');
-    const progressText = document.getElementById('progressText');
+    const countEl = document.getElementById('count');
 
-    let selectedFiles = []; // { file: File, dataUrl?: string }
+    let photos = [];
+    let photoCount = 0;
+    const MAX_PHOTOS = 6;
 
-    // Telegram WebApp доступен в window.Telegram.WebApp
-    const tg = window.Telegram && window.Telegram.WebApp ? window.Telegram.WebApp : null;
-    if (tg && tg.ready) tg.ready();
+    const tg = window.Telegram.WebApp;
+    tg.ready();
+    tg.expand();
 
-    // Удобная функция для создания превью
-    function addPreview(dataUrl) {
-      const idx = selectedFiles.length - 1;
-      const div = document.createElement('div');
-      div.className = 'thumb';
-      const img = document.createElement('img');
-      img.src = dataUrl;
-      div.appendChild(img);
-
-      const remove = document.createElement('button');
-      remove.className = 'remove-btn';
-      remove.textContent = '×';
-      remove.title = 'Удалить';
-      remove.onclick = () => {
-        // удаляем элемент и соответствующий файл
-        const pos = Array.from(photosWrap.children).indexOf(div);
-        if (pos >= 0) {
-          selectedFiles.splice(pos, 1);
-          photosWrap.removeChild(div);
-        }
-      };
-      div.appendChild(remove);
-      photosWrap.appendChild(div);
-    }
-
-    // Обработчик выбора файлов
-    fileInput.addEventListener('change', async (e) => {
-      const files = Array.from(e.target.files || []);
-      if (!files.length) return;
-
-      // Ограничиваем максимум
-      if (selectedFiles.length + files.length > MAX_PHOTOS) {
-        alert(`Максимум ${MAX_PHOTOS} фото. Удалите лишние или выберите меньше.`);
-        return;
-      }
-
-      for (const f of files) {
-        // Добавляем в массив временно; dataUrl будет добавлен при подготовке
-        selectedFiles.push({ file: f });
-        // Покажем временное превью (если возможно)
-        const reader = new FileReader();
-        reader.onload = (ev) => {
-          addPreview(ev.target.result);
-        };
-        reader.readAsDataURL(f);
-      }
-
-      // Сбрасываем input, чтобы можно было выбрать те же файлы повторно
-      fileInput.value = '';
-    });
-
-    // Кнопка «Открыть камеру» — прокидываем к input
-    takeBtn.addEventListener('click', () => {
-      fileInput.click();
-    });
-
-    // Ресайз изображения через canvas -> dataURL (уменьшение размера)
-    async function fileToResizedDataUrl(file) {
-      return new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = async (ev) => {
-          try {
-            const img = new Image();
-            img.onload = () => {
-              // Вычисляем новые размеры
-              let w = img.width;
-              let h = img.height;
-              if (w > MAX_WIDTH) {
-                const ratio = MAX_WIDTH / w;
-                w = Math.round(w * ratio);
-                h = Math.round(h * ratio);
-              }
-              const canvas = document.createElement('canvas');
-              canvas.width = w;
-              canvas.height = h;
-              const ctx = canvas.getContext('2d');
-              ctx.drawImage(img, 0, 0, w, h);
-              // Получаем dataURL в jpeg
-              const dataUrl = canvas.toDataURL('image/jpeg', JPEG_QUALITY);
-              resolve(dataUrl);
-            };
-            img.onerror = (e) => reject(new Error('Ошибка загрузки изображения'));
-            img.src = ev.target.result;
-          } catch (err) {
-            reject(err);
-          }
-        };
-        reader.onerror = (err) => reject(err);
-        reader.readAsDataURL(file);
+    navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } })
+      .then(stream => {
+        video.srcObject = stream;
+        video.play();
+      })
+      .catch(err => {
+        document.body.innerHTML = `<div class="error">❌ Не удалось получить доступ к камере.<br>Разрешите доступ в настройках Telegram.</div>`;
+        console.error("Ошибка камеры:", err);
       });
-    }
 
-    // Подсчёт примерного размера base64 в байтах
-    function approxBase64Size(dataUrl) {
-      // data:image/jpeg;base64,<base64>
-      const idx = dataUrl.indexOf(',');
-      const base64 = idx >= 0 ? dataUrl.slice(idx + 1) : dataUrl;
-      // каждый 4 base64 символа -> 3 байта
-      return Math.ceil(base64.length * 3 / 4);
-    }
+    captureBtn.onclick = () => {
+      if (photoCount >= MAX_PHOTOS) return;
 
-    // Отправка данных в бота
-    sendBtn.addEventListener('click', async () => {
-      if (!selectedFiles.length) {
-        alert('Выберите хотя бы одно фото.');
-        return;
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+      photos.push(dataUrl);
+      photoCount++;
+
+      countEl.textContent = photoCount;
+
+      if (photoCount === MAX_PHOTOS) {
+        captureBtn.disabled = true;
+        sendBtn.style.display = 'block';
       }
+    };
 
-      // Ограничение количества
-      if (selectedFiles.length > MAX_PHOTOS) {
-        alert(`Максимум ${MAX_PHOTOS} фото.`);
-        return;
-      }
+    sendBtn.onclick = () => {
+      const payload = {
+        action: "return_photos",
+        photoCount: photoCount,
+        photos: photos
+      };
 
-      // Подготовка: ресайз и кодирование
-      try {
-        sendBtn.disabled = true;
-        takeBtn.disabled = true;
-        progressWrap.style.display = 'block';
-        progressEl.value = 0;
-        progressText.textContent = 'Подготовка изображений...';
-
-        const photosData = [];
-        let totalBytes = 0;
-        for (let i = 0; i < selectedFiles.length; i++) {
-          progressText.textContent = `Обработка ${i + 1}/${selectedFiles.length}...`;
-          const item = selectedFiles[i];
-          const dataUrl = await fileToResizedDataUrl(item.file);
-          const size = approxBase64Size(dataUrl);
-          totalBytes += size;
-          photosData.push(dataUrl);
-          // обновление прогресса (ориентировочно по файлам)
-          progressEl.value = Math.round(((i + 1) / selectedFiles.length) * 80);
-        }
-
-        // Простой лимит общего размера (опционально)
-        const mb = totalBytes / (1024 * 1024);
-        if (mb > MAX_TOTAL_MB) {
-          const ok = confirm(`Общий размер изображений ~${mb.toFixed(1)} MB — это может не пройти. Отправить всё равно?`);
-          if (!ok) {
-            sendBtn.disabled = false;
-            takeBtn.disabled = false;
-            progressWrap.style.display = 'none';
-            return;
-          }
-        }
-
-        progressEl.value = 85;
-        progressText.textContent = 'Отправка в бот...';
-
-        // Формируем полезную нагрузку в том виде, как ожидает бот
-        const payload = {
-          action: 'return_photos',
-          photoCount: photosData.length,
-          photos: photosData
-        };
-
-        const json = JSON.stringify(payload);
-
-        // Отправляем через Telegram WebApp API
-        if (tg && tg.sendData) {
-          tg.sendData(json);
-          progressEl.value = 100;
-          progressText.textContent = 'Данные отправлены. Закрытие...';
-          // Закрываем WebApp (если нужно)
-          setTimeout(() => { try { tg.close(); } catch(e){} }, 500);
-        } else {
-          // Фолбек: посмотрим, можно ли отправить через postMessage (для отладки)
-          console.warn('Telegram WebApp API недоступен. Для теста сообщение выводится в консоль.');
-          console.log('WEBAPP_PAYLOAD', payload);
-          alert('Telegram WebApp API недоступен. Проверьте в реальном WebApp через Telegram.');
-        }
-
-      } catch (err) {
-        console.error('Ошибка при подготовке/отправке', err);
-        alert('Ошибка при подготовке фото: ' + err.message);
-      } finally {
-        sendBtn.disabled = false;
-        takeBtn.disabled = false;
-        // можно не очищать selectedFiles автоматически — пользователь увидит статус
-      }
-    });
-
-    // Если хотите — можно добавить удаление всех превью при закрытии или после отправки
+      tg.sendData(JSON.stringify(payload));
+      tg.close();
+    };
   </script>
 </body>
 </html>
