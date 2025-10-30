@@ -77,6 +77,7 @@
 
   <div id="controls">
     <button id="captureBtn">📸 Сделать фото</button>
+    <button id="flashBtn" title="Включить/выключить вспышку">⚡ Вспышка: выкл</button>
     <button id="sendBtn">📤 Отправить всё</button>
   </div>
 
@@ -148,6 +149,21 @@
       .then(stream => {
         video.srcObject = stream;
         video.play();
+        // Save the video track so we can control torch (flash) when supported
+        window._videoTrack = stream.getVideoTracks && stream.getVideoTracks()[0];
+        if (window._videoTrack) {
+          try {
+            const caps = window._videoTrack.getCapabilities && window._videoTrack.getCapabilities();
+            if (caps && caps.torch) {
+              statusEl.textContent = 'Вспышка: доступна';
+            } else {
+              // some devices may support ImageCapture flash modes
+              statusEl.textContent = 'Вспышка: не поддерживается устройством';
+            }
+          } catch (e) {
+            console.warn('getCapabilities failed', e);
+          }
+        }
       })
       .catch(err => {
         document.body.innerHTML = `<div class="error">❌ Не удалось получить доступ к камере.<br>Разрешите доступ в настройках Telegram.</div>`;
@@ -187,6 +203,69 @@
       for (let i = 0; i < binary.length; i++) array.push(binary.charCodeAt(i));
       return new Blob([new Uint8Array(array)], { type: mime });
     }
+
+    // Flash / torch control
+    const flashBtn = document.getElementById('flashBtn');
+    let flashEnabled = false;
+
+    function updateFlashButton() {
+      flashBtn.textContent = flashEnabled ? '⚡ Вспышка: вкл' : '⚡ Вспышка: выкл';
+      flashBtn.style.background = flashEnabled ? '#ffd60a' : '#444';
+      flashBtn.style.color = flashEnabled ? '#000' : '#fff';
+    }
+
+    async function setTorch(on) {
+      const track = window._videoTrack;
+      if (!track) {
+        statusEl.textContent = 'Вспышка: камера не инициализирована';
+        return false;
+      }
+      const caps = track.getCapabilities && track.getCapabilities();
+      if (caps && caps.torch) {
+        try {
+          await track.applyConstraints({ advanced: [{ torch: on }] });
+          return true;
+        } catch (err) {
+          console.warn('applyConstraints torch error', err);
+          return false;
+        }
+      }
+
+      // Fallback: try ImageCapture APIs to request a flash when taking a photo (limited support)
+      try {
+        if (window.ImageCapture) {
+          const ic = new ImageCapture(track);
+          const photoCaps = await ic.getPhotoCapabilities().catch(() => null);
+          if (photoCaps && photoCaps.fillLightMode && photoCaps.fillLightMode.length) {
+            // we cannot enable continuous torch via ImageCapture; inform user
+            statusEl.textContent = 'Вспышка доступна только при съёмке (будет использована при capture)';
+            return true;
+          }
+        }
+      } catch (e) {
+        console.warn('ImageCapture check failed', e);
+      }
+
+      statusEl.textContent = 'Вспышка не поддерживается на этом устройстве';
+      return false;
+    }
+
+    flashBtn.addEventListener('click', async () => {
+      // toggle
+      const desired = !flashEnabled;
+      const ok = await setTorch(desired);
+      if (ok) {
+        flashEnabled = desired;
+        updateFlashButton();
+      } else {
+        // show unsupported message briefly
+        statusEl.textContent = 'Не удалось изменить режим вспышки';
+        setTimeout(() => { statusEl.textContent = ''; }, 2500);
+      }
+    });
+
+    // initialize flash button UI
+    updateFlashButton();
 
     // Send photos to server endpoint (recommended)
     async function uploadToServer(url) {
