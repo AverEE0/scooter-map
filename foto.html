@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Акт возврата - Фото (отправка админу)</title>
+  <title>Документирование - Фото</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body {
@@ -42,29 +42,102 @@
       font-size: 16px;
       font-weight: bold;
       cursor: pointer;
+      transition: all 0.3s;
+    }
+    button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
     }
     #captureBtn {
       background: #ff3b30;
       color: white;
+    }
+    #captureBtn:active:not(:disabled) {
+      transform: scale(0.95);
     }
     #sendBtn {
       background: #34c759;
       color: white;
       display: none;
     }
+    #sendBtn:active:not(:disabled) {
+      transform: scale(0.95);
+    }
+    #flashBtn {
+      background: #444;
+      color: white;
+      max-width: 120px;
+    }
     #counter {
       text-align: center;
       margin: 12px 0;
       font-size: 18px;
+      font-weight: 600;
     }
     .error {
       color: #ff3b30;
       text-align: center;
       padding: 20px;
     }
-    #status { text-align:center; margin-top:10px; font-size:14px; }
-    #advanced { margin-top:12px; font-size:13px; color:#ccc }
-    input, label { font-size:13px }
+    #status { 
+      text-align: center; 
+      margin-top: 10px; 
+      font-size: 14px;
+      min-height: 20px;
+    }
+    
+    /* Loader */
+    .loader {
+      border: 3px solid #f3f3f3;
+      border-top: 3px solid #34c759;
+      border-radius: 50%;
+      width: 30px;
+      height: 30px;
+      animation: spin 1s linear infinite;
+      display: inline-block;
+      margin: 10px auto;
+    }
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+    
+    /* Success overlay */
+    #successOverlay {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0, 0, 0, 0.9);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      flex-direction: column;
+      z-index: 1000;
+    }
+    #successOverlay.show {
+      display: flex;
+    }
+    .success-icon {
+      font-size: 80px;
+      margin-bottom: 20px;
+      animation: scaleIn 0.5s ease-out;
+    }
+    .success-text {
+      font-size: 24px;
+      font-weight: bold;
+      margin-bottom: 10px;
+    }
+    .success-subtext {
+      font-size: 16px;
+      color: #ccc;
+    }
+    @keyframes scaleIn {
+      0% { transform: scale(0); }
+      50% { transform: scale(1.1); }
+      100% { transform: scale(1); }
+    }
   </style>
 </head>
 <body>
@@ -77,211 +150,191 @@
 
   <div id="controls">
     <button id="captureBtn">📸 Сделать фото</button>
-    <button id="flashBtn" title="Включить/выключить вспышку">⚡ Вспышка: выкл</button>
-    <button id="sendBtn">📤 Отправить всё</button>
+    <button id="flashBtn" title="Включить/выключить вспышку">⚡ Выкл</button>
+    <button id="sendBtn">✅ Готово</button>
   </div>
 
   <div id="status"></div>
-
-  <!-- Advanced options: можно оставить пустыми. Рекомендуемый способ: настроить серверный endpoint и указать его URL ниже. -->
-  <div id="advanced">
-    <details>
-      <summary>Дополнительно: настройки отправки (нажмите чтобы раскрыть)</summary>
-      <p>Рекомендуется настроить серверный endpoint, который примет фото и отправит их администраторам от имени бота (без передачи токена в клиенте).</p>
-      <p>
-        1) Укажите URL вашего сервера, например: <code>https://example.com/upload_photos</code>.
-      </p>
-      <p>
-        2) Если вы хотите отправлять напрямую из клиента (НЕ РЕКОМЕНДУЕТСЯ — токен бота будет виден в коде/клиенте), разверните "Direct to Telegram" и укажите токен и ID администраторов.
-      </p>
-
-      <div>
-        <label>Server upload URL: <input id="serverUrl" type="text" value="https://down-8vvo.onrender.com/upload_photos" placeholder="https://your.server/upload_photos" style="width:100%" /></label>
-        <p style="color:#bbb; margin-top:6px;">Используется внешний адрес, указанный вами. Убедитесь, что сервер доступен по HTTPS и принимает POST /upload_photos.</p>
-      </div>
-      <hr>
-      <details>
-        <summary>Direct to Telegram (небезопасно, используйте только для теста)</summary>
-        <div>
-          <label>Bot token: <input id="botToken" type="text" placeholder="123456:ABC-DEF..." style="width:100%" /></label>
-        </div>
-        <div>
-          <label>Admin chat IDs (comma-separated): <input id="adminIds" type="text" placeholder="123456789,987654321" style="width:100%" /></label>
-        </div>
-      </details>
-
-    </details>
+  
+  <!-- Success overlay -->
+  <div id="successOverlay">
+    <div class="success-icon">✅</div>
+    <div class="success-text">Фото отправлены!</div>
+    <div class="success-subtext">Окно закроется автоматически...</div>
   </div>
 
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
   <script>
-    // ==================================================================================
-    // Этот файл основан на оригинальной foto.html (сохранена логика съёмки).
-    // Изменения: при нажатии "Отправить всё" добавлена опция отправки фото администраторам.
-    // Подходы:
-    //  - РЕКОМЕНДУЕМЫЙ: укажите SERVER_UPLOAD_URL — клиент загрузит фото на ваш сервер (POST multipart/form-data),
-    //    сервер уже отправит фото администраторам с помощью Bot API (без раскрытия токена на клиенте).
-    //  - ОПЦИЯ (небезопасно): укажите BOT_TOKEN и ADMIN IDs ниже — клиент отправит фото напрямую в Telegram Bot API.
-    // ==================================================================================
-
     const video = document.getElementById('video');
     const canvas = document.getElementById('canvas');
     const ctx = canvas.getContext('2d');
     const captureBtn = document.getElementById('captureBtn');
     const sendBtn = document.getElementById('sendBtn');
+    const flashBtn = document.getElementById('flashBtn');
     const countEl = document.getElementById('count');
     const statusEl = document.getElementById('status');
+    const successOverlay = document.getElementById('successOverlay');
 
-    const serverUrlInput = document.getElementById('serverUrl');
-    const botTokenInput = document.getElementById('botToken');
-    const adminIdsInput = document.getElementById('adminIds');
+    // Server URL - замените на ваш реальный endpoint
+    const SERVER_URL = 'https://down-8vvo.onrender.com/upload_photos';
 
     let photos = [];
     let photoCount = 0;
     const MAX_PHOTOS = 6;
+    const MIN_PHOTOS = 4;
 
     const tg = window.Telegram ? window.Telegram.WebApp : null;
     if (tg) {
-      try { tg.ready(); tg.expand(); } catch(e) { console.warn('tg init', e); }
+      try { 
+        tg.ready(); 
+        tg.expand();
+        // Настраиваем цвета под тему Telegram
+        if (tg.themeParams) {
+          document.body.style.background = tg.themeParams.bg_color || '#000';
+        }
+      } catch(e) { 
+        console.warn('tg init', e); 
+      }
     }
 
-    navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } })
+    // Запуск камеры
+    navigator.mediaDevices.getUserMedia({ 
+      video: { 
+        facingMode: 'environment',
+        width: { ideal: 1920 },
+        height: { ideal: 1080 }
+      } 
+    })
       .then(stream => {
         video.srcObject = stream;
         video.play();
-        // Save the video track so we can control torch (flash) when supported
         window._videoTrack = stream.getVideoTracks && stream.getVideoTracks()[0];
+        
         if (window._videoTrack) {
           try {
             const caps = window._videoTrack.getCapabilities && window._videoTrack.getCapabilities();
             if (caps && caps.torch) {
-              statusEl.textContent = 'Вспышка: доступна';
+              statusEl.textContent = '💡 Вспышка доступна';
             } else {
-              // some devices may support ImageCapture flash modes
-              statusEl.textContent = 'Вспышка: не поддерживается устройством';
+              statusEl.textContent = '📷 Камера готова';
             }
           } catch (e) {
             console.warn('getCapabilities failed', e);
+            statusEl.textContent = '📷 Камера готова';
           }
         }
       })
       .catch(err => {
-        document.body.innerHTML = `<div class="error">❌ Не удалось получить доступ к камере.<br>Разрешите доступ в настройках Telegram.</div>`;
+        document.body.innerHTML = `<div class="error">❌ Не удалось получить доступ к камере.<br><br>Разрешите доступ к камере в настройках Telegram.</div>`;
         console.error("Ошибка камеры:", err);
       });
 
+    // Съемка фото
     captureBtn.onclick = () => {
-      if (photoCount >= MAX_PHOTOS) return;
+      if (photoCount >= MAX_PHOTOS) {
+        statusEl.textContent = '⚠️ Достигнут максимум фото (6)';
+        return;
+      }
 
-      canvas.width = video.videoWidth || 1280;
-      canvas.height = video.videoHeight || 720;
+      canvas.width = video.videoWidth || 1920;
+      canvas.height = video.videoHeight || 1080;
 
       ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
-      // Сохраняем сжатый JPEG, чтобы уменьшить размер
-      const dataUrl = canvas.toDataURL('image/jpeg', 0.7);
+      // Сохраняем JPEG с хорошим качеством
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
       photos.push(dataUrl);
       photoCount++;
 
       countEl.textContent = photoCount;
+      
+      // Визуальная обратная связь
+      captureBtn.textContent = '✅ Снято!';
+      setTimeout(() => {
+        captureBtn.textContent = '📸 Сделать фото';
+      }, 300);
+
+      // Показываем кнопку отправки при достижении минимума
+      if (photoCount >= MIN_PHOTOS) {
+        sendBtn.style.display = 'block';
+        sendBtn.textContent = `✅ Готово (${photoCount})`;
+      }
 
       if (photoCount === MAX_PHOTOS) {
         captureBtn.disabled = true;
-        sendBtn.style.display = 'block';
+        captureBtn.textContent = '✅ Все фото сделаны';
+        statusEl.textContent = `✅ Готово! Нажмите "Готово" для отправки`;
+      } else {
+        statusEl.textContent = `📸 ${photoCount} из ${MAX_PHOTOS} (минимум ${MIN_PHOTOS})`;
       }
-
-      // Показываем кнопку отправки также если сделали хотя бы 1 фото
-      if (photoCount > 0) sendBtn.style.display = 'block';
     };
 
-    // Utility: convert dataURL to Blob
-    function dataURLToBlob(dataURL) {
-      const parts = dataURL.split(',');
-      const mime = parts[0].match(/:(.*?);/)[1];
-      const binary = atob(parts[1]);
-      const array = [];
-      for (let i = 0; i < binary.length; i++) array.push(binary.charCodeAt(i));
-      return new Blob([new Uint8Array(array)], { type: mime });
-    }
-
-    // Flash / torch control
-    const flashBtn = document.getElementById('flashBtn');
+    // Вспышка
     let flashEnabled = false;
 
     function updateFlashButton() {
-      flashBtn.textContent = flashEnabled ? '⚡ Вспышка: вкл' : '⚡ Вспышка: выкл';
+      flashBtn.textContent = flashEnabled ? '⚡ Вкл' : '⚡ Выкл';
       flashBtn.style.background = flashEnabled ? '#ffd60a' : '#444';
       flashBtn.style.color = flashEnabled ? '#000' : '#fff';
     }
 
     async function setTorch(on) {
       const track = window._videoTrack;
-      if (!track) {
-        statusEl.textContent = 'Вспышка: камера не инициализирована';
-        return false;
-      }
+      if (!track) return false;
+      
       const caps = track.getCapabilities && track.getCapabilities();
       if (caps && caps.torch) {
         try {
           await track.applyConstraints({ advanced: [{ torch: on }] });
           return true;
         } catch (err) {
-          console.warn('applyConstraints torch error', err);
+          console.warn('torch error', err);
           return false;
         }
       }
-
-      // Fallback: try ImageCapture APIs to request a flash when taking a photo (limited support)
-      try {
-        if (window.ImageCapture) {
-          const ic = new ImageCapture(track);
-          const photoCaps = await ic.getPhotoCapabilities().catch(() => null);
-          if (photoCaps && photoCaps.fillLightMode && photoCaps.fillLightMode.length) {
-            // we cannot enable continuous torch via ImageCapture; inform user
-            statusEl.textContent = 'Вспышка доступна только при съёмке (будет использована при capture)';
-            return true;
-          }
-        }
-      } catch (e) {
-        console.warn('ImageCapture check failed', e);
-      }
-
-      statusEl.textContent = 'Вспышка не поддерживается на этом устройстве';
       return false;
     }
 
     flashBtn.addEventListener('click', async () => {
-      // toggle
       const desired = !flashEnabled;
       const ok = await setTorch(desired);
       if (ok) {
         flashEnabled = desired;
         updateFlashButton();
+        statusEl.textContent = flashEnabled ? '⚡ Вспышка включена' : '📷 Вспышка выключена';
       } else {
-        // show unsupported message briefly
-        statusEl.textContent = 'Не удалось изменить режим вспышки';
-        setTimeout(() => { statusEl.textContent = ''; }, 2500);
+        statusEl.textContent = '⚠️ Вспышка не поддерживается';
       }
     });
 
-    // initialize flash button UI
     updateFlashButton();
 
-    // Send photos to server endpoint (recommended)
-    async function uploadToServer(url) {
-      if (!url) throw new Error('Server URL not provided');
-      statusEl.textContent = 'Отправка на сервер...';
+    // Утилита: dataURL -> Blob
+    function dataURLToBlob(dataURL) {
+      const parts = dataURL.split(',');
+      const mime = parts[0].match(/:(.*?);/)[1];
+      const binary = atob(parts[1]);
+      const array = [];
+      for (let i = 0; i < binary.length; i++) {
+        array.push(binary.charCodeAt(i));
+      }
+      return new Blob([new Uint8Array(array)], { type: mime });
+    }
 
+    // Отправка на сервер
+    async function uploadToServer(url) {
       const form = new FormData();
       form.append('photoCount', photos.length);
-      // Добавляем файлы: photo0, photo1, ...
-      photos.forEach((d, idx) => {
-        const blob = dataURLToBlob(d);
+      
+      photos.forEach((dataUrl, idx) => {
+        const blob = dataURLToBlob(dataUrl);
         form.append('photo' + idx, blob, `photo_${idx}.jpg`);
       });
 
-      // Можно добавить дополнительную мета-информацию, например id аренды
-      // form.append('rental_id', '...');
+      // Добавляем метаданные для бота (если нужны)
+      if (tg && tg.initDataUnsafe && tg.initDataUnsafe.user) {
+        form.append('user_id', tg.initDataUnsafe.user.id);
+      }
 
       const resp = await fetch(url, {
         method: 'POST',
@@ -290,102 +343,105 @@
 
       if (!resp.ok) {
         const text = await resp.text();
-        throw new Error('Server error: ' + resp.status + ' ' + text);
+        throw new Error(`Ошибка сервера: ${resp.status} ${text}`);
       }
 
-      const result = await resp.json().catch(() => null);
-      return result;
+      return await resp.json().catch(() => ({ success: true }));
     }
 
-    // Direct send to Telegram Bot API from client (insecure — token exposed in client). Use only for testing.
-    async function sendDirectToTelegram(botToken, adminIds) {
-      if (!botToken) throw new Error('Bot token not provided');
-      if (!adminIds || adminIds.length === 0) throw new Error('Admin IDs not provided');
-
-      statusEl.textContent = 'Отправка напрямую в Telegram (под капотом Bot API)...';
-
-      // For each admin, send photos one by one (could be optimized with sendMediaGroup server-side)
-      for (const adminId of adminIds) {
-        for (let i = 0; i < photos.length; i++) {
-          const blob = dataURLToBlob(photos[i]);
-          const fd = new FormData();
-          fd.append('chat_id', adminId.trim());
-          fd.append('photo', blob, `photo_${i}.jpg`);
-          fd.append('caption', `Фото возврата (${i+1}/${photos.length})`);
-
-          const res = await fetch(`https://api.telegram.org/bot${botToken}/sendPhoto`, {
-            method: 'POST',
-            body: fd
-          });
-
-          if (!res.ok) {
-            const text = await res.text();
-            throw new Error('Telegram API error: ' + res.status + ' ' + text);
-          }
+    // Показ успеха и закрытие
+    function showSuccessAndClose() {
+      successOverlay.classList.add('show');
+      
+      // Уведомляем бота об успешной загрузке
+      if (tg) {
+        try {
+          tg.sendData(JSON.stringify({ 
+            action: 'uploaded_to_server', 
+            photoCount: photoCount 
+          }));
+        } catch(e) {
+          console.warn('sendData failed', e);
         }
       }
-
-      return true;
+      
+      // Закрываем окно через 1.5 секунды
+      setTimeout(() => {
+        if (tg) {
+          try { 
+            tg.close(); 
+          } catch(e) {
+            console.warn('close failed', e);
+            // Fallback: просто показываем сообщение
+            successOverlay.querySelector('.success-subtext').textContent = 'Можете закрыть это окно';
+          }
+        }
+      }, 1500);
     }
 
-    // Fallback: send small metadata to bot via tg.sendData (may be too large for images)
-    function sendViaWebAppData() {
-      if (!tg) throw new Error('Telegram WebApp not available');
-      statusEl.textContent = 'Отправка данных в бот через WebApp (без файлов)...';
-      const payload = {
-        action: "return_photos",
-        photoCount: photoCount,
-        // НЕ отправляем сами большие dataURLs здесь, только миниатюры или пустой маркер
-        // если вы хотите отправлять thumbnails, добавьте уменьшенные версии (очень маленькие)
-        note: 'photos_ready_on_client'
-      };
-      tg.sendData(JSON.stringify(payload));
-      return true;
+    // Показ ошибки
+    function showError(message) {
+      statusEl.textContent = '❌ ' + message;
+      statusEl.style.color = '#ff3b30';
+      
+      if (tg) {
+        try {
+          tg.showAlert('Ошибка: ' + message);
+        } catch(e) {}
+      } else {
+        alert('Ошибка: ' + message);
+      }
     }
 
+    // Отправка
     sendBtn.onclick = async () => {
-      statusEl.textContent = '';
+      if (photoCount < MIN_PHOTOS) {
+        showError(`Необходимо минимум ${MIN_PHOTOS} фото (сделано: ${photoCount})`);
+        return;
+      }
+
+      // Блокируем кнопки
       sendBtn.disabled = true;
       captureBtn.disabled = true;
-
-      const serverUrl = (serverUrlInput && serverUrlInput.value && serverUrlInput.value.trim()) || null;
-      const botToken = (botTokenInput && botTokenInput.value && botTokenInput.value.trim()) || null;
-      const adminIdsRaw = (adminIdsInput && adminIdsInput.value && adminIdsInput.value.trim()) || null;
-      const adminIds = adminIdsRaw ? adminIdsRaw.split(',').map(s => s.trim()).filter(Boolean) : [];
+      flashBtn.disabled = true;
+      
+      // Показываем индикатор загрузки
+      statusEl.innerHTML = '<div class="loader"></div>';
+      statusEl.style.color = 'white';
+      sendBtn.textContent = '⏳ Отправка...';
 
       try {
-        if (serverUrl) {
-          // Recommended flow: upload to your server; server will forward to admins
-          const res = await uploadToServer(serverUrl);
-          statusEl.textContent = 'Успешно отправлено на сервер.';
-          // Optionally inform the bot via WebApp that upload finished
-          if (tg) {
-            try { tg.sendData(JSON.stringify({ action: 'uploaded_to_server', result: res })); } catch(e) { console.warn(e); }
-          }
-        } else if (botToken && adminIds.length > 0) {
-          // Direct (insecure) sending from client to Telegram
-          await sendDirectToTelegram(botToken, adminIds);
-          statusEl.textContent = 'Фото отправлены администраторам напрямую.';
-          if (tg) { try { tg.sendData(JSON.stringify({ action: 'sent_direct'})); } catch(e){} }
-        } else if (tg) {
-          // Fallback: notify bot to request files another way (e.g., ask user to upload or use server)
-          sendViaWebAppData();
-          statusEl.textContent = 'Данные отправлены в бот (без файлов). Настройте сервер для приёма фото.';
-        } else {
-          throw new Error('Нет способа отправить фото: укажите Server URL или Bot Token + Admin IDs.');
-        }
+        await uploadToServer(SERVER_URL);
+        
+        // Успех!
+        showSuccessAndClose();
+        
       } catch (err) {
-        console.error(err);
-        statusEl.textContent = 'Ошибка при отправке: ' + (err.message || err);
-        alert('Ошибка при отправке: ' + (err.message || err));
-      } finally {
+        console.error('Upload error:', err);
+        
+        // Восстанавливаем кнопки
         sendBtn.disabled = false;
         captureBtn.disabled = false;
-        // Optionally close webapp
-        try { if (tg) tg.close(); } catch(e){}
+        flashBtn.disabled = false;
+        sendBtn.textContent = `✅ Готово (${photoCount})`;
+        
+        showError(err.message || 'Не удалось отправить фото');
       }
     };
+
+    // Обработка закрытия WebApp
+    if (tg) {
+      window.addEventListener('beforeunload', () => {
+        // Отключаем камеру при закрытии
+        if (window._videoTrack) {
+          try {
+            window._videoTrack.stop();
+          } catch(e) {}
+        }
+      });
+    }
 
   </script>
 </body>
 </html>
+
