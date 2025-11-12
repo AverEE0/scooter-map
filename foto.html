@@ -11,7 +11,523 @@
       padding: 16px;
       background: #000;
       color: white;
+      height: 100vh;<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Документирование - Фото</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+      padding: 16px;
+      background: #000;
+      color: white;
       height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+    #videoContainer {
+      position: relative;
+      width: 100%;
+      flex: 1;
+      overflow: hidden;
+      border-radius: 12px;
+      background: #111;
+    }
+    #video {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+    #canvas { display: none; }
+    #controls {
+      margin-top: 16px;
+      display: flex;
+      gap: 12px;
+    }
+    button {
+      flex: 1;
+      padding: 14px;
+      border: none;
+      border-radius: 10px;
+      font-size: 16px;
+      font-weight: bold;
+      cursor: pointer;
+      transition: all 0.3s;
+    }
+    button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+    #captureBtn {
+      background: #ff3b30;
+      color: white;
+    }
+    #captureBtn:active:not(:disabled) {
+      transform: scale(0.95);
+    }
+    #sendBtn {
+      background: #34c759;
+      color: white;
+      display: none;
+    }
+    #sendBtn:active:not(:disabled) {
+      transform: scale(0.95);
+    }
+    #flashBtn {
+      background: #444;
+      color: white;
+      max-width: 120px;
+    }
+    #counter {
+      text-align: center;
+      margin: 12px 0;
+      font-size: 18px;
+      font-weight: 600;
+    }
+    .error {
+      color: #ff3b30;
+      text-align: center;
+      padding: 20px;
+    }
+    #status { 
+      text-align: center; 
+      margin-top: 10px; 
+      font-size: 14px;
+      min-height: 20px;
+    }
+    
+    /* Progress bar */
+    #progressContainer {
+      display: none;
+      margin-top: 10px;
+      background: #333;
+      border-radius: 10px;
+      overflow: hidden;
+      height: 8px;
+    }
+    #progressBar {
+      height: 100%;
+      background: linear-gradient(90deg, #34c759, #30d158);
+      width: 0%;
+      transition: width 0.3s;
+    }
+    
+    /* Loader */
+    .loader {
+      border: 3px solid #f3f3f3;
+      border-top: 3px solid #34c759;
+      border-radius: 50%;
+      width: 30px;
+      height: 30px;
+      animation: spin 1s linear infinite;
+      display: inline-block;
+      margin: 10px auto;
+    }
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+    
+    /* Success overlay */
+    #successOverlay {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0, 0, 0, 0.95);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      flex-direction: column;
+      z-index: 1000;
+    }
+    #successOverlay.show {
+      display: flex;
+    }
+    .success-icon {
+      font-size: 80px;
+      margin-bottom: 20px;
+      animation: scaleIn 0.5s ease-out;
+    }
+    .success-text {
+      font-size: 24px;
+      font-weight: bold;
+      margin-bottom: 10px;
+    }
+    .success-subtext {
+      font-size: 16px;
+      color: #ccc;
+    }
+    @keyframes scaleIn {
+      0% { transform: scale(0); }
+      50% { transform: scale(1.1); }
+      100% { transform: scale(1); }
+    }
+  </style>
+</head>
+<body>
+  <div id="videoContainer">
+    <video id="video" autoplay playsinline muted></video>
+    <canvas id="canvas"></canvas>
+  </div>
+
+  <div id="counter">Сделано фото: <span id="count">0</span> / 3</div>
+
+  <div id="controls">
+    <button id="captureBtn">📸 Сделать фото</button>
+    <button id="flashBtn" title="Включить/выключить вспышку">⚡ Выкл</button>
+    <button id="sendBtn">✅ Готово</button>
+  </div>
+
+  <div id="progressContainer">
+    <div id="progressBar"></div>
+  </div>
+
+  <div id="status"></div>
+  
+  <!-- Success overlay -->
+  <div id="successOverlay">
+    <div class="success-icon">✅</div>
+    <div class="success-text">Фото отправлены!</div>
+    <div class="success-subtext" id="successSubtext">Закрытие...</div>
+  </div>
+
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <script>
+    const video = document.getElementById('video');
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    const captureBtn = document.getElementById('captureBtn');
+    const sendBtn = document.getElementById('sendBtn');
+    const flashBtn = document.getElementById('flashBtn');
+    const countEl = document.getElementById('count');
+    const statusEl = document.getElementById('status');
+    const successOverlay = document.getElementById('successOverlay');
+    const progressContainer = document.getElementById('progressContainer');
+    const progressBar = document.getElementById('progressBar');
+    const successSubtext = document.getElementById('successSubtext');
+
+    // Фото отправляются напрямую в Telegram бота через WebApp API
+    // ОГРАНИЧЕНИЕ: Telegram sendData лимит ~64KB, поэтому максимум 3 фото
+    let photos = [];
+    let photoCount = 0;
+    const MAX_PHOTOS = 3;
+    const MIN_PHOTOS = 1;
+
+    const tg = window.Telegram ? window.Telegram.WebApp : null;
+    if (tg) {
+      try { 
+        tg.ready(); 
+        tg.expand();
+        // Настраиваем цвета под тему Telegram
+        if (tg.themeParams) {
+          document.body.style.background = tg.themeParams.bg_color || '#000';
+        }
+      } catch(e) { 
+        console.warn('tg init', e); 
+      }
+    }
+
+    // Запуск камеры с низким разрешением для Telegram WebApp sendData
+    navigator.mediaDevices.getUserMedia({ 
+      video: { 
+        facingMode: 'environment',
+        width: { ideal: 640 },  // Низкое разрешение для экономии размера
+        height: { ideal: 480 }  // Низкое разрешение для экономии размера
+      } 
+    })
+      .then(stream => {
+        video.srcObject = stream;
+        video.play();
+        window._videoTrack = stream.getVideoTracks && stream.getVideoTracks()[0];
+        
+        if (window._videoTrack) {
+          try {
+            const caps = window._videoTrack.getCapabilities && window._videoTrack.getCapabilities();
+            if (caps && caps.torch) {
+              statusEl.textContent = '💡 Вспышка доступна';
+            } else {
+              statusEl.textContent = '📷 Камера готова';
+            }
+          } catch (e) {
+            console.warn('getCapabilities failed', e);
+            statusEl.textContent = '📷 Камера готова';
+          }
+        }
+      })
+      .catch(err => {
+        document.body.innerHTML = `<div class="error">❌ Не удалось получить доступ к камере.<br><br>Разрешите доступ к камере в настройках Telegram.</div>`;
+        console.error("Ошибка камеры:", err);
+      });
+
+    // Съемка фото
+    captureBtn.onclick = () => {
+      if (photoCount >= MAX_PHOTOS) {
+        statusEl.textContent = '⚠️ Достигнут максимум фото (3)';
+        return;
+      }
+
+      // Сжимаем МАКСИМАЛЬНО для отправки через Telegram WebApp API (лимит ~64KB)
+      // Уменьшаем разрешение до 480x360 и качество до 0.35
+      const maxWidth = 480;
+      const maxHeight = 360;
+      
+      const videoWidth = video.videoWidth || 1280;
+      const videoHeight = video.videoHeight || 720;
+      const ratio = Math.min(maxWidth / videoWidth, maxHeight / videoHeight);
+      
+      canvas.width = Math.floor(videoWidth * ratio);
+      canvas.height = Math.floor(videoHeight * ratio);
+
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+      // Сохраняем JPEG с МАКСИМАЛЬНЫМ сжатием для Telegram sendData (качество 0.35)
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.35);
+      
+      // Проверяем размер фото
+      const photoSizeKB = Math.ceil(dataUrl.length * 0.75 / 1024); // Примерный размер в KB
+      console.log(`Фото ${photoCount + 1}: ~${photoSizeKB} KB`);
+      
+      photos.push(dataUrl);
+      photoCount++;
+
+      countEl.textContent = photoCount;
+      
+      // Визуальная обратная связь
+      captureBtn.textContent = '✅ Снято!';
+      setTimeout(() => {
+        captureBtn.textContent = '📸 Сделать фото';
+      }, 300);
+
+      // Показываем кнопку отправки при достижении минимума
+      if (photoCount >= MIN_PHOTOS) {
+        sendBtn.style.display = 'block';
+        sendBtn.textContent = `✅ Готово (${photoCount})`;
+      }
+
+      if (photoCount === MAX_PHOTOS) {
+        captureBtn.disabled = true;
+        captureBtn.textContent = '✅ Максимум фото';
+        statusEl.textContent = `✅ Готово! Нажмите "Готово" для отправки`;
+      } else {
+        const sizeEstimate = Math.ceil((photoCount * 15) + 5); // Примерная оценка размера в KB
+        statusEl.textContent = `📸 ${photoCount} из ${MAX_PHOTOS} (~${sizeEstimate} KB)`;
+      }
+    };
+
+    // Вспышка
+    let flashEnabled = false;
+
+    function updateFlashButton() {
+      flashBtn.textContent = flashEnabled ? '⚡ Вкл' : '⚡ Выкл';
+      flashBtn.style.background = flashEnabled ? '#ffd60a' : '#444';
+      flashBtn.style.color = flashEnabled ? '#000' : '#fff';
+    }
+
+    async function setTorch(on) {
+      const track = window._videoTrack;
+      if (!track) return false;
+      
+      const caps = track.getCapabilities && track.getCapabilities();
+      if (caps && caps.torch) {
+        try {
+          await track.applyConstraints({ advanced: [{ torch: on }] });
+          return true;
+        } catch (err) {
+          console.warn('torch error', err);
+          return false;
+        }
+      }
+      return false;
+    }
+
+    flashBtn.addEventListener('click', async () => {
+      const desired = !flashEnabled;
+      const ok = await setTorch(desired);
+      if (ok) {
+        flashEnabled = desired;
+        updateFlashButton();
+        statusEl.textContent = flashEnabled ? '⚡ Вспышка включена' : '📷 Вспышка выключена';
+      } else {
+        statusEl.textContent = '⚠️ Вспышка не поддерживается';
+      }
+    });
+
+    updateFlashButton();
+
+    // Отправка фото напрямую в Telegram бота через WebApp API
+    async function sendPhotosToBot() {
+      // Показываем прогресс
+      progressContainer.style.display = 'block';
+      
+      // Отправляем прогресс
+      let progress = 0;
+      const updateProgress = (percent) => {
+        progressBar.style.width = percent + '%';
+      };
+
+      try {
+        // Отправляем фото напрямую в бота через Telegram WebApp API
+        if (!tg) {
+          throw new Error('Telegram WebApp не доступен');
+        }
+        
+        // ВАЖНО: Отправляем все фото ОДНИМ пакетом (но сжатые)
+        // Проверяем размер перед отправкой
+        const data = {
+          action: 'return_photos',
+          photos: photos,
+          photoCount: photos.length
+        };
+        
+        const jsonData = JSON.stringify(data);
+        const sizeKB = new Blob([jsonData]).size / 1024;
+        
+        console.log(`Размер данных: ${sizeKB.toFixed(2)} KB`);
+        
+        // Telegram WebApp sendData лимит ~64KB (но рекомендуется меньше)
+        if (sizeKB > 60) {
+          throw new Error(`Данные слишком большие (${sizeKB.toFixed(0)} KB). Максимум: 60 KB. Сделайте меньше фото или уменьшите качество.`);
+        }
+        
+        updateProgress(50);
+        
+        // Отправляем данные боту
+        tg.sendData(jsonData);
+        
+        updateProgress(100);
+        
+        console.log(`Отправлено ${photos.length} фото боту (${sizeKB.toFixed(2)} KB)`);
+        return { success: true };
+        
+      } catch (err) {
+        progressBar.style.width = '0%';
+        throw err;
+      }
+    }
+
+    // Функция закрытия WebApp
+    function closeWebApp() {
+      // Останавливаем камеру
+      if (window._videoTrack) {
+        try {
+          window._videoTrack.stop();
+        } catch(e) {}
+      }
+      
+      // Пробуем разные способы закрытия
+      if (tg) {
+        try {
+          tg.close();
+        } catch(e) {
+          console.warn('tg.close() failed', e);
+        }
+      }
+      
+      // Fallback: закрываем окно
+      try {
+        window.close();
+      } catch(e) {
+        console.warn('window.close() failed', e);
+      }
+    }
+
+    // Показ успеха
+    function showSuccess() {
+      successOverlay.classList.add('show');
+      
+      // Закрываем НЕМЕДЛЕННО (данные уже отправлены через tg.sendData)
+      closeWebApp();
+      
+      // Дополнительные попытки закрытия через короткие интервалы
+      setTimeout(() => closeWebApp(), 100);
+      setTimeout(() => closeWebApp(), 300);
+      setTimeout(() => closeWebApp(), 500);
+    }
+
+    // Показ ошибки
+    function showError(message) {
+      statusEl.innerHTML = '❌ ' + message;
+      statusEl.style.color = '#ff3b30';
+      progressContainer.style.display = 'none';
+      
+      if (tg) {
+        try {
+          tg.showAlert('Ошибка: ' + message);
+        } catch(e) {
+          alert('Ошибка: ' + message);
+        }
+      } else {
+        alert('Ошибка: ' + message);
+      }
+    }
+
+    // Отправка
+    sendBtn.onclick = async () => {
+      if (photoCount < MIN_PHOTOS) {
+        showError(`Необходимо минимум ${MIN_PHOTOS} фото (сделано: ${photoCount})`);
+        return;
+      }
+
+      // Блокируем кнопки
+      sendBtn.disabled = true;
+      captureBtn.disabled = true;
+      flashBtn.disabled = true;
+      
+      // Показываем индикатор загрузки
+      statusEl.innerHTML = '<div class="loader"></div><br>Отправка фото в бота...';
+      statusEl.style.color = 'white';
+      sendBtn.textContent = '⏳ Отправка...';
+
+      try {
+        const startTime = Date.now();
+        await sendPhotosToBot();
+        const duration = ((Date.now() - startTime) / 1000).toFixed(1);
+        console.log(`Photos sent to bot in ${duration}s`);
+        
+        // Успех!
+        showSuccess();
+        
+      } catch (err) {
+        console.error('Send error:', err);
+        
+        // Восстанавливаем кнопки
+        sendBtn.disabled = false;
+        captureBtn.disabled = false;
+        flashBtn.disabled = false;
+        sendBtn.textContent = `✅ Готово (${photoCount})`;
+        
+        let errorMsg = err.message || 'Не удалось отправить фото';
+        
+        // Специальная обработка для WebAppDataInvalid
+        if (errorMsg.includes('слишком большие') || errorMsg.includes('60 KB')) {
+          errorMsg = `Фото слишком большие (${photoCount} шт). Попробуйте:\n• Сделать меньше фото (1-2)\n• Или отправьте по одному`;
+        }
+        
+        showError(errorMsg);
+      }
+    };
+
+    // Обработка закрытия WebApp
+    if (tg) {
+      window.addEventListener('beforeunload', () => {
+        // Отключаем камеру при закрытии
+        if (window._videoTrack) {
+          try {
+            window._videoTrack.stop();
+          } catch(e) {}
+        }
+      });
+    }
+
+  </script>
+</body>
+</html>
+
       display: flex;
       flex-direction: column;
     }
