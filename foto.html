@@ -198,9 +198,7 @@
     const progressBar = document.getElementById('progressBar');
     const successSubtext = document.getElementById('successSubtext');
 
-    // Server URL - замените на ваш реальный endpoint
-    const SERVER_URL = 'https://down-8vvo.onrender.com/upload_photos';
-
+    // Фото отправляются напрямую в Telegram бота через WebApp API
     let photos = [];
     let photoCount = 0;
     const MAX_PHOTOS = 6;
@@ -333,67 +331,41 @@
 
     updateFlashButton();
 
-    // Утилита: dataURL -> Blob (оптимизированная)
-    function dataURLToBlob(dataURL) {
-      const parts = dataURL.split(',');
-      const mime = parts[0].match(/:(.*?);/)[1];
-      const binary = atob(parts[1]);
-      const array = new Uint8Array(binary.length);
-      for (let i = 0; i < binary.length; i++) {
-        array[i] = binary.charCodeAt(i);
-      }
-      return new Blob([array], { type: mime });
-    }
-
-    // Отправка на сервер с прогресс-баром
-    async function uploadToServer(url) {
-      const form = new FormData();
-      form.append('photoCount', photos.length);
-      
-      // Конвертируем все фото в Blob
-      const blobs = photos.map((dataUrl, idx) => {
-        const blob = dataURLToBlob(dataUrl);
-        console.log(`Фото ${idx}: ${(blob.size / 1024).toFixed(2)} KB`);
-        return blob;
-      });
-      
+    // Отправка фото напрямую в Telegram бота через WebApp API
+    async function sendPhotosToBot() {
       // Показываем прогресс
       progressContainer.style.display = 'block';
       
-      // Добавляем блобы в форму
-      blobs.forEach((blob, idx) => {
-        form.append('photo' + idx, blob, `photo_${idx}.jpg`);
-      });
-
-      // Добавляем метаданные для бота (если нужны)
-      if (tg && tg.initDataUnsafe && tg.initDataUnsafe.user) {
-        form.append('user_id', tg.initDataUnsafe.user.id);
-      }
-
       // Симулируем прогресс
       let progress = 0;
       const progressInterval = setInterval(() => {
-        progress += 10;
+        progress += 15;
         if (progress < 90) {
           progressBar.style.width = progress + '%';
         }
-      }, 200);
+      }, 100);
 
       try {
-        const resp = await fetch(url, {
-          method: 'POST',
-          body: form
-        });
-
+        // Отправляем фото напрямую в бота через Telegram WebApp API
+        if (!tg) {
+          throw new Error('Telegram WebApp не доступен');
+        }
+        
+        const data = {
+          action: 'return_photos',
+          photos: photos,
+          photoCount: photos.length
+        };
+        
+        // Отправляем данные боту
+        tg.sendData(JSON.stringify(data));
+        
         clearInterval(progressInterval);
         progressBar.style.width = '100%';
-
-        if (!resp.ok) {
-          const text = await resp.text();
-          throw new Error(`Ошибка сервера: ${resp.status}`);
-        }
-
-        return await resp.json().catch(() => ({ success: true }));
+        
+        console.log(`Отправлено ${photos.length} фото боту`);
+        return { success: true };
+        
       } catch (err) {
         clearInterval(progressInterval);
         throw err;
@@ -430,20 +402,7 @@
     function showSuccess() {
       successOverlay.classList.add('show');
       
-      // Уведомляем бота об успешной загрузке СРАЗУ
-      if (tg) {
-        try {
-          tg.sendData(JSON.stringify({ 
-            action: 'uploaded_to_server', 
-            photoCount: photoCount 
-          }));
-          console.log('Sent data to bot:', photoCount);
-        } catch(e) {
-          console.warn('sendData failed', e);
-        }
-      }
-      
-      // Закрываем НЕМЕДЛЕННО (без задержки)
+      // Закрываем НЕМЕДЛЕННО (данные уже отправлены через tg.sendData)
       closeWebApp();
       
       // Дополнительные попытки закрытия через короткие интервалы
@@ -482,21 +441,21 @@
       flashBtn.disabled = true;
       
       // Показываем индикатор загрузки
-      statusEl.innerHTML = '<div class="loader"></div><br>Отправка фото...';
+      statusEl.innerHTML = '<div class="loader"></div><br>Отправка фото в бота...';
       statusEl.style.color = 'white';
       sendBtn.textContent = '⏳ Отправка...';
 
       try {
         const startTime = Date.now();
-        await uploadToServer(SERVER_URL);
+        await sendPhotosToBot();
         const duration = ((Date.now() - startTime) / 1000).toFixed(1);
-        console.log(`Upload completed in ${duration}s`);
+        console.log(`Photos sent to bot in ${duration}s`);
         
         // Успех!
         showSuccess();
         
       } catch (err) {
-        console.error('Upload error:', err);
+        console.error('Send error:', err);
         
         // Восстанавливаем кнопки
         sendBtn.disabled = false;
@@ -504,7 +463,7 @@
         flashBtn.disabled = false;
         sendBtn.textContent = `✅ Готово (${photoCount})`;
         
-        showError(err.message || 'Не удалось отправить фото. Проверьте интернет-соединение.');
+        showError(err.message || 'Не удалось отправить фото. Попробуйте снова.');
       }
     };
 
